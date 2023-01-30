@@ -254,10 +254,7 @@ app.post(
 "type": "${req.body.type}"
 "timesig": "${req.body.timesig}"
 }
-{{< md >}}
-  
-${req.body.description}
-        </div><br>
+</div><br>
         ${req.body.type === "midi" ? ifmidi : ifaudio}</body>
     </html>`,
     });
@@ -283,6 +280,7 @@ app.post(
     res.set("Content-Type", "audio/wav");
     req.pipe(timidity.stdin);
     timidity.stdout.pipe(res);
+    log.info("Synth request fulfilled from " + req.headers["x-forwarded-for"]);
   }
 );
 
