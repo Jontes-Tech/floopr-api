@@ -6,6 +6,8 @@ import cors from "cors";
 const hcaptcha = require("express-hcaptcha");
 dotenv.config();
 import nodemailer from "nodemailer";
+import rateLimit from "express-rate-limit";
+import { spawn } from "child_process";
 const SECRET = process.env.HCAPTCHA_SECRET_KEY;
 const log = createLogger(
   {
@@ -28,10 +30,45 @@ const log = createLogger(
 
 const app = express();
 app.use(express.json());
-app.use(cors());
+app.use(
+  cors({
+    origin: "https://floopr.org",
+  })
+);
+
+app.get("/", (req: any, res: any) => {
+  res.redirect("https://floopr.org");
+});
+
+app.get(
+  "/v1/publicstats",
+  rateLimit({
+    windowMs: 60 * 60 * 1000,
+    max: 40,
+    standardHeaders: true,
+  }),
+  async (req: any, res: any) => {
+    const downloads = await fetch(
+      "https://stats.jontes.page/api/v1/stats/aggregate?metrics=events&site_id=floopr.org&filters=event%3Aname%3D%3DFile%20Download",
+      {
+        headers: {
+          Authorization: "Bearer " + process.env.PLAUSIBLE_KEY,
+        },
+      }
+    );
+    res.send({
+      downloads: (await downloads.json()).results.events.value,
+    });
+  }
+);
 
 app.post(
-  "/contribute",
+  "/v1/contribute",
+  rateLimit({
+    windowMs: 60 * 60 * 1000,
+    max: 20,
+    standardHeaders: true,
+  }),
   hcaptcha.middleware.validate(SECRET),
   async (req: any, res: any) => {
     let ifmidi = `Save this in /static/audio/${req.body.category}/${req.body.filename}.mid.audio
@@ -209,14 +246,14 @@ app.post(
         req.body.filename
       }.${req.body.filetype}.md
     <br>
-        <div class="code">---
-title: "${req.body.title}"
-authors: [${req.body.creator}]
-key: "${req.body.key}"
-tempo: "${req.body.tempo}"
-type: "${req.body.type}"
-timesig: "${req.body.timesig}"
----
+        <div class="code">{
+"title": "${req.body.title}"
+"authors": [${req.body.creator}]
+"key": "${req.body.key}"
+"tempo": "${req.body.tempo}"
+"type": "${req.body.type}"
+"timesig": "${req.body.timesig}"
+}
 {{< md >}}
   
 ${req.body.description}
@@ -231,6 +268,21 @@ ${req.body.description}
         req.headers["x-forwarded-for"] || req.socket.remoteAddress
       } containing ${req.body.title}`
     );
+  }
+);
+
+app.post(
+  "/v1/synth",
+  rateLimit({
+    windowMs: 60 * 60 * 1000,
+    max: 20,
+    standardHeaders: true,
+  }),
+  (req, res) => {
+    const timidity = spawn("timidity", ["-", "-Ow", "-o", "-"]);
+    res.set("Content-Type", "audio/wav");
+    req.pipe(timidity.stdin);
+    timidity.stdout.pipe(res);
   }
 );
 

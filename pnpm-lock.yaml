@@ -12,6 +12,7 @@ specifiers:
   dotenv: ^16.0.3
   express: ^4.18.2
   express-hcaptcha: ^0.0.3
+  express-rate-limit: ^6.7.0
   nodemailer: ^6.8.0
   nodemon: ^2.0.20
   ts-node: ^10.9.1
@@ -23,6 +24,7 @@ dependencies:
   dotenv: 16.0.3
   express: 4.18.2
   express-hcaptcha: 0.0.3
+  express-rate-limit: 6.7.0_express@4.18.2
   nodemailer: 6.8.0
   typescript: 4.9.3
 
@@ -381,6 +383,15 @@ packages:
     resolution: {integrity: sha512-wukEty6dq0eMd19Dy24uDzwZbixlsIEZKYs0ukABA0tKK0YesWin0ojyPGmnvbOX0yTnK6rwjvn7gahZjXFFew==}
     dependencies:
       hcaptcha: 0.0.2
+    dev: false
+
+  /express-rate-limit/6.7.0_express@4.18.2:
+    resolution: {integrity: sha512-vhwIdRoqcYB/72TK3tRZI+0ttS8Ytrk24GfmsxDXK9o9IhHNO5bXRiXQSExPQ4GbaE5tvIS7j1SGrxsuWs+sGA==}
+    engines: {node: '>= 12.9.0'}
+    peerDependencies:
+      express: ^4 || ^5
+    dependencies:
+      express: 4.18.2
     dev: false
 
   /express/4.18.2:
