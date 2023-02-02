@@ -8,6 +8,7 @@ dotenv.config();
 import nodemailer from "nodemailer";
 import rateLimit from "express-rate-limit";
 import { spawn } from "child_process";
+import https from "https";
 const SECRET = process.env.HCAPTCHA_SECRET_KEY;
 const log = createLogger(
   {
@@ -277,10 +278,14 @@ app.post(
   }),
   (req, res) => {
     const timidity = spawn("timidity", ["-", "-Ow", "-o", "-"]);
-    res.set("Content-Type", "audio/wav");
+    const cdn_req = https.request(
+      "https://v2cdn.nodesite.eu/",
+      { method: "PUT" },
+      (cdn_res) => cdn_res.pipe(res)
+    );
+    cdn_req.setHeader("Content-Type", "audio/wave");
     req.pipe(timidity.stdin);
-    timidity.stdout.pipe(res);
-    log.info("Synth request fulfilled from " + req.headers["x-forwarded-for"]);
+    timidity.stdout.pipe(cdn_req);
   }
 );
 
