@@ -33,7 +33,7 @@ const app = express();
 app.use(express.json());
 app.use(
   cors({
-    origin: "http://test.floopr.org:3001",
+    origin: "http://floopr.org",
   })
 );
 
