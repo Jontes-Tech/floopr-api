@@ -73,9 +73,9 @@ app.post(
   hcaptcha.middleware.validate(SECRET),
   async (req: any, res: any) => {
     let ifmidi = `Save this in /public/loops/${req.body.category}/${req.body.filename}.${req.body.filetype}
-  cdn.nodesite.eu/${req.body.audio}.${req.body.filetype}<br>
+  cdn.nodesite.eu/${req.body.midi}.mid<br>
   And this in /public/loops/${req.body.category}/${req.body.filename}.mid<br>
-  v2cdn.nodesite.eu/${req.body.midi}.mid`;
+  v2cdn.nodesite.eu/${req.body.audio}.wav`;
     let ifaudio = `Save this in /public/loops/${req.body.category}/${req.body.filename}.${req.body.filetype}
   cdn.nodesite.eu/${req.body.audio}.${req.body.filetype}`;
 
@@ -104,11 +104,11 @@ app.post(
       </head>
       <body>
           <h1>New Post By ${req.body.creator} (${req.body.email}) @ ${
-          req.headers["x-forwarded-for"] || req.socket.remoteAddress
-        }</h1>
+        req.headers["x-forwarded-for"] || req.socket.remoteAddress
+      }</h1>
           Add the following content to /src/pages/loops/${req.body.category}/${
-          req.body.filename
-        }.json
+        req.body.filename
+      }.json
       <br>
           <div style="background-color:#d1d5db; white-space:pre; padding: 2vw">{
   "title": "${req.body.title}",
