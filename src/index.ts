@@ -116,7 +116,14 @@ app.get("/v1/loops", async (req, res) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
   try {
     const pageNumber = parseInt(req.query.pageNumber as string) || 0;
-    const limit = parseInt(req.query.limit as string) || 10;
+    const limit = parseInt(req.query.limit as string || "128")
+    if (limit > 128) {
+      res.status(400).send({
+        success: false,
+        message: "Limit must be less than or equal to 64",
+      });
+      return;
+    }
     const result: any = {};
     const instrument = req.query.instrument as string;
 
@@ -172,6 +179,10 @@ app.get("/v1/loops/:filename", function (req, res) {
     })
     .catch(function (err: any) {
       console.log(err);
+      if (err.code == "NoSuchKey") {
+        res.status(404).send({ success: false, message: "Loop not found" });
+        return;
+      }
       res.status(500).send({ success: false, message: err.message });
     });
 });
@@ -210,7 +221,7 @@ app.post(
       res.status(400).send({ success: false, message: "Captcha failed" });
       return;
     }
-
+    
     let objectID = await db.collection("submissions").insertOne({
       title: loopForm.data.title,
       author: loopForm.data.author,
