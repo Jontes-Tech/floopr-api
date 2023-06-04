@@ -7,7 +7,11 @@ import Multer from "multer";
 import { z } from "zod";
 import slugify from "slugify";
 config();
-import { client } from "./database";
+import { client, MONGOID } from "./database";
+import crypto from "crypto";
+import sgMail from "@sendgrid/mail";
+
+sgMail.setApiKey(process.env.SENDGRID_API_KEY as string);
 
 // FIXME: remove password before pushing to prod
 
@@ -18,7 +22,7 @@ interface LoopResponse {
   loops: Array<{
     _id: string;
     title: string;
-    authors: string;
+    author: string;
     files: string[];
     key: string;
     tempo: string;
@@ -116,7 +120,7 @@ app.get("/v1/loops", async (req, res) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
   try {
     const pageNumber = parseInt(req.query.pageNumber as string) || 0;
-    const limit = parseInt(req.query.limit as string || "128")
+    const limit = parseInt((req.query.limit as string) || "128");
     if (limit > 128) {
       res.status(400).send({
         success: false,
@@ -221,7 +225,7 @@ app.post(
       res.status(400).send({ success: false, message: "Captcha failed" });
       return;
     }
-    
+
     let objectID = await db.collection("submissions").insertOne({
       title: loopForm.data.title,
       author: loopForm.data.author,
@@ -235,7 +239,72 @@ app.post(
       submissionEmail: loopForm.data.submissionEmail,
       submissionIP: ip,
       date: new Date().getTime(),
+      confirmed: false,
     });
+
+    // Generate URL-safe confirmation token
+    const confirmationToken = crypto
+      .randomBytes(32)
+      .toString("base64")
+      .replace(/\+/g, "-")
+      .replace(/\//g, "_")
+      .replace(/=/g, "");
+
+    await db.collection("confirmationIDs").insertOne({
+      token: confirmationToken,
+      submissionID: objectID.insertedId,
+      date: new Date().getTime(),
+      submissionEmail: loopForm.data.submissionEmail,
+    });
+
+    // Simple email template
+    const emailTemplate = `
+      <style>
+        body {
+          background-color: #171717;
+          font-family: sans-serif;
+        }
+        a {
+          color: ##4ade80;
+        }
+        a:hover {
+          text-decoration: underline;
+        }
+        h1 {
+          color: #fff;
+        }
+        p {
+          color: #d1d5db;
+        }
+        img {
+          width: 200px;
+        }
+      </style>
+      <img src="https://floopr.org/img/floopr-static.svg">
+      <h1>Thanks for submitting your loop to the Loop Library!</h1>
+      <p>If this was you, please click the link below to confirm your submission.</p>
+      <a href="https://api.floopr.org/v1/confirm?token=${confirmationToken}">Confirm your submission (link expires in 24 hours)</a>
+      <p>If you did not post to Floopr or don't know who we are, you can safely ignore this message.</p>
+      <p>Thanks again! - Floopr Team</p>
+    `;
+
+    const msg = {
+      to: loopForm.data.submissionEmail, // Change to your recipient
+      from: "hi@floopr.org", // Change to your verified sender
+      subject: "Floopr - New submission under your email",
+      html: emailTemplate,
+    };
+    sgMail
+      .send(msg)
+      .then(() => {
+        console.log(
+          "Successfully sent confirmation email to " +
+            loopForm.data.submissionEmail
+        );
+      })
+      .catch((error) => {
+        console.error(error);
+      });
 
     minioClient.putObject(
       "submissions",
@@ -253,6 +322,243 @@ app.post(
     );
   }
 );
+
+app.get("/v1/confirm", async (req, res) => {
+  const confirmationToken = req.query.token;
+  if (!confirmationToken) {
+    res.status(400).send({ success: false, message: "No token provided" });
+    return;
+  }
+  const confirmationID = await db
+    .collection("confirmationIDs")
+    .findOne({ token: confirmationToken });
+  if (!confirmationID) {
+    res.status(400).send({ success: false, message: "Invalid token" });
+    return;
+  }
+
+  // If the token is older than 24 hours, delete it and return an error
+  if (confirmationID.date + 86400000 < new Date().getTime()) {
+    res.status(400).send({ success: false, message: "Token expired" });
+    db.collection("confirmationIDs").deleteOne({ token: confirmationToken });
+    return;
+  }
+
+  await db
+    .collection("submissions")
+    .updateOne(
+      { _id: confirmationID.submissionID },
+      { $set: { confirmed: true } }
+    )
+    .then(() => {
+      db.collection("confirmationIDs").deleteOne({ token: confirmationToken });
+    })
+    .catch((err) => {
+      console.log(err);
+      res
+        .status(500)
+        .send({ success: false, message: "Error confirming submission" });
+      return;
+    });
+
+  res.send({ success: true, message: "Submission confirmed" });
+});
+
+app.get("/v1/submissions", async (req, res) => {
+  const submissions = await db
+    .collection("submissions")
+    .find({ confirmed: true })
+    .sort({ date: -1 })
+    .toArray();
+  res.send(submissions);
+});
+
+app.delete("/v1/:submissionID", async (req, res) => {
+  const reason = req.query.reason || "";
+  const submissionID = req.params.submissionID || "";
+  const auth = req.headers.authorization || "";
+
+  if (!auth || auth !== process.env.SUPERSECRETADMIN) {
+    res.status(401).send({ success: false, message: "Unauthorized" });
+    return;
+  }
+
+  if (!submissionID) {
+    res
+      .status(400)
+      .send({ success: false, message: "No submission ID provided" });
+    return;
+  }
+
+  const submission = await db
+    .collection("submissions")
+    .findOne({ _id: new MONGOID(submissionID) });
+  if (!submission) {
+    res.status(400).send({ success: false, message: "Invalid submission ID" });
+    return;
+  }
+
+  // Let the user know their submission was denied
+  const emailTemplate = `
+    <style>
+      body {
+        background-color: #171717;
+        font-family: sans-serif;
+      }
+      h1 {
+        color: #fff;
+      }
+      p {
+        color: #d1d5db;
+      }
+      img {
+        width: 200px;
+      }
+      </style>
+      <img src="https://floopr.org/img/floopr-static.svg">
+      <h1>We're sorry, your loop was not accepted by Floopr.</h1>
+      <p>Here's why:</p>
+      <p>"${reason}" - A Floopr Moderator</p>
+      <p>If you think this was a mistake, please reply to this email.</p>
+      <p>Thanks for posting! - Floopr Team</p>
+  `;
+
+  const msg = {
+    to: submission.submissionEmail, // Change to your recipient
+    from: "hi@floopr.org", // Change to your verified sender
+    subject: "Floopr - We're sorry, your loop was not accepted",
+    html: emailTemplate,
+  };
+  sgMail
+    .send(msg)
+    .then(() => {
+      console.log("Successfully bad news to " + submission.submissionEmail);
+    })
+    .catch((error) => {
+      console.error(error);
+    });
+
+  submission.files.forEach((file: string) => {
+    minioClient.removeObject(
+      "submissions",
+      submission._id + "." + file,
+      function (error: any) {
+        if (error) {
+          console.log(error);
+          res.status(500).send({
+            success: false,
+            message: "Error deleting file from storage",
+          });
+          return;
+        }
+      }
+    );
+  });
+
+  await db.collection("submissions").deleteOne({ _id: submission._id });
+
+  res.send({ success: true, message: "Submission deleted, sent bad news" });
+});
+
+app.post("/v1/approve/:submissionID", async (req, res) => {
+  const submissionID = req.params.submissionID || "";
+  const auth = req.headers.authorization || "";
+
+  if (!auth || auth !== process.env.SUPERSECRETADMIN) {
+    res.status(401).send({ success: false, message: "Unauthorized" });
+    return;
+  }
+
+  if (!submissionID) {
+    res
+      .status(400)
+      .send({ success: false, message: "No submission ID provided" });
+    return;
+  }
+
+  const submission = await db
+    .collection("submissions")
+    .findOne({ _id: new MONGOID(submissionID) });
+  if (!submission) {
+    res.status(400).send({ success: false, message: "Invalid submission ID" });
+    return;
+  }
+
+  // Let the user know their submission was approved
+  const emailTemplate = `
+    <style>
+      body {
+        background-color: #171717;
+        font-family: sans-serif;
+      }
+      h1 {
+        color: #fff;
+      }
+      p {
+        color: #d1d5db;
+      }
+      img {
+        width: 200px;
+      }
+      </style>
+      <img src="https://floopr.org/img/floopr-static.svg">
+      <h1>Congratulations! Your loop was accepted by Floopr.</h1>
+      <p>You'll be able to see it on the site soon.</p>
+      <p>Thanks for posting! - Floopr Team</p>
+  `;
+  const msg = {
+    to: submission.submissionEmail, // Change to your recipient
+    from: "hi@floopr.org",
+    subject: "Floopr - Your loop was accepted",
+    html: emailTemplate,
+  };
+
+  sgMail
+    .send(msg)
+    .then(() => {
+      console.log(
+        "Successfully sent good news to " + submission.submissionEmail
+      );
+    })
+    .catch((error) => {
+      console.error(error);
+    });
+
+  // Move the submission to the loops collection
+  await db.collection("loops").insertOne({ ...req.body, _id: submission._id });
+
+  await db.collection("submissions").deleteOne({ _id: submission._id });
+
+  submission.files.forEach((file: string) => {
+    minioClient.copyObject(
+      "loops",
+      submission._id + "." + file,
+      "/submissions/" + submission._id + "." + file,
+      function (e: any) {
+        if (e) {
+          return console.log(e);
+        }
+        console.log("Successfully copied the object:");
+      }
+    );
+    minioClient.removeObject(
+      "submissions",
+      submission._id + "." + file,
+      function (error: any) {
+        if (error) {
+          console.log(error);
+          res.status(500).send({
+            success: false,
+            message: "Error deleting file from storage",
+          });
+          return;
+        }
+      }
+    );
+  });
+
+  res.send({ success: true, message: "Submission approved!" });
+});
 
 app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);

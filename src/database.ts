@@ -1,6 +1,7 @@
-import { MongoClient } from "mongodb";
+import { MongoClient, ObjectId } from "mongodb";
 
 export const client = new MongoClient(process.env.MONGO as string);
+export const MONGOID = ObjectId;
 
 async function connectToDatabase() {
   try {
