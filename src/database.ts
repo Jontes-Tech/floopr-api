@@ -1,6 +1,10 @@
 import { MongoClient, ObjectId } from "mongodb";
 
-export const client = new MongoClient(process.env.MONGO as string);
+const client = new MongoClient(process.env.MONGO as string);
+export const db = client.db("floopr");
+export const loopsCollection = db.collection("loops");
+export const submissionsCollection = db.collection("submissions");
+export const confirmationIDsCollection = db.collection("confirmationIDs");
 export const MONGOID = ObjectId;
 
 async function connectToDatabase() {
