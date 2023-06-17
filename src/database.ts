@@ -5,6 +5,7 @@ export const db = client.db("floopr");
 export const loopsCollection = db.collection("loops");
 export const submissionsCollection = db.collection("submissions");
 export const confirmationIDsCollection = db.collection("confirmationIDs");
+export const contactCollection = db.collection("contact");
 export const MONGOID = ObjectId;
 
 async function connectToDatabase() {

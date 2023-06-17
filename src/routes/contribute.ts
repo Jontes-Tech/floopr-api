@@ -5,10 +5,24 @@ import { loopFormSchema } from "../schemas";
 import slugify from "slugify";
 import crypto from "crypto";
 import sgMail from "@sendgrid/mail";
+import { spawn } from "child_process";
 
+// file deepcode ignore NoRateLimitingForExpensiveWebOperation: We're rateliming in src/index.ts
 export const contribute = async (req: Request, res: Response) => {
   if (!req.file) {
     res.status(400).send({ success: false, message: "No file uploaded" });
+    return;
+  }
+  if (req.file.mimetype === "audio/mid" || req.file.mimetype === "audio/midi" || req.file.mimetype === "audio/x-midi") {
+    res.status(400).send({ success: false, message: "MIDI files are not supported, please check back later." });
+    return;
+  }
+  if (
+    (req.file.mimetype !== "audio/mpeg",
+    req.file.mimetype !== "audio/wav",
+    req.file.mimetype !== "audio/ogg")
+  ) {
+    res.status(400).send({ success: false, message: "Invalid file type" });
     return;
   }
   const ip = req.headers["x-forwarded-for"] || req.socket.remoteAddress;
@@ -125,11 +139,36 @@ export const contribute = async (req: Request, res: Response) => {
   } else {
     console.log("To confirm, use token :" + confirmationToken);
   }
+
+  // ffmpeg -i inputbuffer -codec:a libmp3lame -qscale:a 4 -map_metadata -1 -fflags +bitexact -flags:v +bitexact -flags:a +bitexact outputbuffer.mp3
+  // Safely convert this to mp3, allowing for no command injection nor any ffmpeg-crashing files
+  const ffmpeg = spawn("ffmpeg", [
+    "-i",
+    "-",
+    "-codec:a",
+    "libmp3lame",
+    "-qscale:a",
+    "4",
+    "-map_metadata",
+    "-1",
+    "-fflags",
+    "+bitexact",
+    "-flags:v",
+    "+bitexact",
+    "-flags:a",
+    "+bitexact",
+    "-f",
+    "mp3",
+    "-",
+  ]);
+  ffmpeg.stdin.write(req.file?.buffer);
+  ffmpeg.stdin.end();
+
   minioClient.putObject(
     "submissions",
     objectID.insertedId.toString() + ".mp3",
-    req.file?.buffer,
-    function (error: any, etag: any) {
+    ffmpeg.stdout,
+    function (error: any) {
       if (error) {
         res
           .status(500)
