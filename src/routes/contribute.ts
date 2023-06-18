@@ -13,13 +13,23 @@ export const contribute = async (req: Request, res: Response) => {
     res.status(400).send({ success: false, message: "No file uploaded" });
     return;
   }
-  if (req.file.mimetype === "audio/mid" || req.file.mimetype === "audio/midi" || req.file.mimetype === "audio/x-midi") {
-    res.status(400).send({ success: false, message: "MIDI files are not supported, please check back later." });
+  console.log(req.file.mimetype)
+  if (
+    req.file.mimetype === "audio/mid" ||
+    req.file.mimetype === "audio/midi" ||
+    req.file.mimetype === "audio/x-midi"
+  ) {
+    res
+      .status(400)
+      .send({
+        success: false,
+        message: "MIDI files are not supported, please check back later.",
+      });
     return;
   }
   if (
-    (req.file.mimetype !== "audio/mpeg",
-    req.file.mimetype !== "audio/wav",
+    (req.file.mimetype !== "audio/mpeg" &&
+    req.file.mimetype !== "audio/wav" &&
     req.file.mimetype !== "audio/ogg")
   ) {
     res.status(400).send({ success: false, message: "Invalid file type" });
@@ -137,10 +147,10 @@ export const contribute = async (req: Request, res: Response) => {
         console.error(error);
       });
   } else {
-    console.log("To confirm, use token :" + confirmationToken);
+    console.log("To confirm, use token:" + confirmationToken);
   }
 
-  // ffmpeg -i inputbuffer -codec:a libmp3lame -qscale:a 4 -map_metadata -1 -fflags +bitexact -flags:v +bitexact -flags:a +bitexact outputbuffer.mp3
+  // ffmpeg -i inputbuffer -codec:a libmp3lame -qscale:a 4 -map_metadata -1 -metadata library="Floopr, the free loop library" -fflags +bitexact -flags:v +bitexact -flags:a +bitexact outputbuffer.mp3
   // Safely convert this to mp3, allowing for no command injection nor any ffmpeg-crashing files
   const ffmpeg = spawn("ffmpeg", [
     "-i",
@@ -151,6 +161,8 @@ export const contribute = async (req: Request, res: Response) => {
     "4",
     "-map_metadata",
     "-1",
+    "-metadata",
+    "library=Floopr, the free loop library",
     "-fflags",
     "+bitexact",
     "-flags:v",
@@ -163,6 +175,9 @@ export const contribute = async (req: Request, res: Response) => {
   ]);
   ffmpeg.stdin.write(req.file?.buffer);
   ffmpeg.stdin.end();
+  ffmpeg.on("error", () => {
+    res.status(500).send({ success: false, message: "Error converting file" });
+  });
 
   minioClient.putObject(
     "submissions",

@@ -3,8 +3,9 @@ import { minioClient, CopyConditions } from "../minio";
 import { submissionsCollection, MONGOID, loopsCollection } from "../database";
 import sgMail from "@sendgrid/mail";
 import slugify from "slugify";
+import { spawn } from "child_process";
 export const approveSubmission = async (req: Request, res: Response) => {
-  const submissionID = req.params.submissionID || "";
+  const submissionID = req.body._id || "";
   const auth = req.headers.authorization || "";
 
   if (!auth || auth !== process.env.SUPERSECRETADMIN) {
@@ -82,7 +83,7 @@ export const approveSubmission = async (req: Request, res: Response) => {
 
   // Move the submission to the loops collection
   await loopsCollection.insertOne({
-    _id: req.body._id,
+    _id: submissionID,
     title: req.body.title,
     author: submission.author,
     files: req.body.files,
@@ -97,17 +98,18 @@ export const approveSubmission = async (req: Request, res: Response) => {
   });
 
   await submissionsCollection.deleteOne({ _id: new MONGOID(submissionID) });
-
+  console.log(
+    `Moving ${submissionID} to loops collection, because it was approved.`
+  );
   // deepcode ignore HTTPSourceWithUncheckedType: We trust the user, because they're an admin. Is that bad practice?
   req.body.files.forEach((file: string) => {
     // COPY /submissions/id.file /loops/id.file
     // Create a CopyConditions instance
     const copyConditions = new CopyConditions();
-
     minioClient.copyObject(
       "loops",
-      req.body._id + "." + file,
-      "/submissions/" + req.body._id + "." + file,
+      submissionID + "." + file,
+      "/submissions/" + submissionID + "." + file,
       copyConditions,
       function (e) {
         if (e) {
@@ -118,7 +120,7 @@ export const approveSubmission = async (req: Request, res: Response) => {
         // DELETE /submissions/id.file
         minioClient.removeObject(
           "submissions",
-          req.body._id + "." + file,
+          submissionID + "." + file,
           function (e) {
             if (e) {
               return console.log(e);
@@ -130,5 +132,5 @@ export const approveSubmission = async (req: Request, res: Response) => {
     );
   });
 
-  res.send({ success: true, message: "Submission approved!" }); 
+  res.send({ success: true, message: "Submission approved!" });
 };

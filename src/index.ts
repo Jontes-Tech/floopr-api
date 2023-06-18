@@ -161,7 +161,7 @@ app.get("/v1/submissions", standardRateLimit, listSubmissions);
 
 app.delete("/v1/:submissionID", standardRateLimit, denySubmission);
 
-app.post("/v1/approve/:submissionID", standardRateLimit, approveSubmission);
+app.post("/v1/approve", standardRateLimit, approveSubmission);
 
 app.get("/", standardRateLimit, (req, res) => {
   res.redirect("https://floopr.org");
