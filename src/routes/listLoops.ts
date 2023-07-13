@@ -23,7 +23,7 @@ export const listLoops = async (req: Request, res: Response) => {
     const loops = await loopsCollection
       .find({ instrument: instrument })
       .skip(pageNumber * limit)
-      .sort({ added: -1 })
+      .sort({ title: 1 })
       .limit(limit)
       .toArray();
 

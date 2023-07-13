@@ -13,27 +13,21 @@ export const contribute = async (req: Request, res: Response) => {
     res.status(400).send({ success: false, message: "No file uploaded" });
     return;
   }
-  console.log(req.file.mimetype)
+  console.log(req.file.mimetype);
   if (
-    req.file.mimetype === "audio/mid" ||
-    req.file.mimetype === "audio/midi" ||
-    req.file.mimetype === "audio/x-midi"
-  ) {
-    res
-      .status(400)
-      .send({
-        success: false,
-        message: "MIDI files are not supported, please check back later.",
-      });
-    return;
-  }
-  if (
-    (req.file.mimetype !== "audio/mpeg" &&
+    req.file.mimetype !== "audio/mpeg" &&
     req.file.mimetype !== "audio/wav" &&
-    req.file.mimetype !== "audio/ogg")
+    req.file.mimetype !== "audio/ogg" &&
+    req.file.mimetype !== "audio/midi" &&
+    req.file.mimetype !== "audio/x-midi" &&
+    req.file.mimetype !== "audio/mid"
   ) {
     res.status(400).send({ success: false, message: "Invalid file type" });
     return;
+  }
+  let midi = false;
+  if (req.file.mimetype === "audio/midi" || req.file.mimetype === "audio/x-midi" || req.file.mimetype === "audio/mid") {
+    midi = true;
   }
   const ip = req.headers["x-forwarded-for"] || req.socket.remoteAddress;
   req.body.tempo = parseInt(req.body.tempo);
@@ -69,7 +63,7 @@ export const contribute = async (req: Request, res: Response) => {
   let objectID = await submissionsCollection.insertOne({
     title: loopForm.data.title,
     author: loopForm.data.author,
-    files: ["mp3"],
+    files: midi ? ["mp3", "mid"] : ["mp3"],
     key: loopForm.data.key,
     tempo: loopForm.data.tempo,
     type: "audio",
@@ -150,47 +144,123 @@ export const contribute = async (req: Request, res: Response) => {
     console.log("To confirm, use token:" + confirmationToken);
   }
 
-  // ffmpeg -i inputbuffer -codec:a libmp3lame -qscale:a 4 -map_metadata -1 -metadata library="Floopr, the free loop library" -fflags +bitexact -flags:v +bitexact -flags:a +bitexact outputbuffer.mp3
-  // Safely convert this to mp3, allowing for no command injection nor any ffmpeg-crashing files
-  const ffmpeg = spawn("ffmpeg", [
-    "-i",
-    "-",
-    "-codec:a",
-    "libmp3lame",
-    "-qscale:a",
-    "4",
-    "-map_metadata",
-    "-1",
-    "-metadata",
-    "library=Floopr, the free loop library",
-    "-fflags",
-    "+bitexact",
-    "-flags:v",
-    "+bitexact",
-    "-flags:a",
-    "+bitexact",
-    "-f",
-    "mp3",
-    "-",
-  ]);
-  ffmpeg.stdin.write(req.file?.buffer);
-  ffmpeg.stdin.end();
-  ffmpeg.on("error", () => {
-    res.status(500).send({ success: false, message: "Error converting file" });
-  });
+  const objectName = objectID.insertedId.toString() + ".mp3";
 
-  minioClient.putObject(
-    "submissions",
-    objectID.insertedId.toString() + ".mp3",
-    ffmpeg.stdout,
-    function (error: any) {
-      if (error) {
-        res
-          .status(500)
-          .send({ success: false, message: "Error uploading file" });
-        return console.log(error);
+  if (req.file.mimetype === "audio/midi" || req.file.mimetype === "audio/x-midi") {
+    // If the file is a MIDI file, convert it to a WAV file using timidity
+    const timidity = spawn("timidity", ["-Ow", "-o", "-", "-"]);
+
+    timidity.stdin.write(req.file?.buffer);
+    timidity.stdin.end();
+
+    // Use ffmpeg to convert the WAV file to an MP3 file
+    const ffmpeg = spawn("ffmpeg", [
+      "-i",
+      "-",
+      "-codec:a",
+      "libmp3lame",
+      "-qscale:a",
+      "4",
+      "-map_metadata",
+      "-1",
+      "-metadata",
+      "library=Floopr, the free loop library",
+      "-fflags",
+      "+bitexact",
+      "-flags:v",
+      "+bitexact",
+      "-flags:a",
+      "+bitexact",
+      "-f",
+      "mp3",
+      "-",
+    ]);
+
+    timidity.stdout.pipe(ffmpeg.stdin);
+
+    ffmpeg.on("error", () => {
+      res
+        .status(500)
+        .send({ success: false, message: "Error converting file" });
+    });
+
+    // Now we upload the raw Midi file to Minio
+    minioClient.putObject(
+      "submissions",
+      objectID.insertedId.toString() + ".mid",
+      req.file?.buffer,
+      function (error: any) {
+        if (error) {
+          res
+            .status(500)
+            .send({ success: false, message: "Error uploading file" });
+          return console.log(error);
+        }
       }
-      res.send({ success: true, message: "File uploaded successfully" });
-    }
-  );
+    );
+
+    // Upload the MP3 file to Minio
+    minioClient.putObject(
+      "submissions",
+      objectName,
+      ffmpeg.stdout,
+      function (error: any) {
+        if (error) {
+          res
+            .status(500)
+            .send({ success: false, message: "Error uploading file" });
+          return console.log(error);
+        }
+        res.send({ success: true, message: "File uploaded successfully" });
+      }
+    );
+  } else {
+    // If the file is not a MIDI file, use ffmpeg to convert it to an MP3 file
+    const ffmpeg = spawn("ffmpeg", [
+      "-i",
+      "-",
+      "-codec:a",
+      "libmp3lame",
+      "-qscale:a",
+      "4",
+      "-map_metadata",
+      "-1",
+      "-metadata",
+      "library=Floopr, the free loop library",
+      "-fflags",
+      "+bitexact",
+      "-flags:v",
+      "+bitexact",
+      "-flags:a",
+      "+bitexact",
+      "-f",
+      "mp3",
+      "-",
+    ]);
+
+    ffmpeg.stdin.write(req.file?.buffer);
+    ffmpeg.stdin.end();
+
+    ffmpeg.on("error", () => {
+      res
+        .status(500)
+        .send({ success: false, message: "Error converting file" });
+    });
+
+    // Upload the MP3 file to Minio
+    minioClient.putObject(
+      "submissions",
+      objectName,
+      ffmpeg.stdout,
+      function (error: any) {
+        if (error) {
+          res
+            .status(500)
+            .send({ success: false, message: "Error uploading file" });
+          return console.log(error);
+        }
+        res.send({ success: true, message: "File uploaded successfully" });
+      }
+    );
+  }
 };
