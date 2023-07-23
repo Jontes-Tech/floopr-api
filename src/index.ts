@@ -163,6 +163,12 @@ app.delete("/v1/:submissionID", standardRateLimit, denySubmission);
 
 app.post("/v1/approve", standardRateLimit, approveSubmission);
 
+app.get("/v1/health", standardRateLimit, (req, res) => {
+  res.setHeader("Content-Type", "application/json; charset=utf-8")
+  res.setHeader("Access-Control-Allow-Origin", "*")
+  res.send({ success: true, message: "Healthy" });
+});
+
 app.get("/", standardRateLimit, (req, res) => {
   res.redirect("https://floopr.org");
 });
