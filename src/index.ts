@@ -165,6 +165,7 @@ app.post("/v1/approve", standardRateLimit, approveSubmission);
 
 app.get("/v1/health", standardRateLimit, (req, res) => {
   res.setHeader("Content-Type", "application/json; charset=utf-8")
+  // deepcode ignore TooPermissiveCorsHeader: We don't need CORS protection because the API is stateless
   res.setHeader("Access-Control-Allow-Origin", "*")
   res.send({ success: true, message: "Healthy" });
 });
