@@ -3,7 +3,7 @@ import { minioClient, CopyConditions } from "../minio";
 import { submissionsCollection, MONGOID, loopsCollection } from "../database";
 import sgMail from "@sendgrid/mail";
 import slugify from "slugify";
-import { spawn } from "child_process";
+
 export const approveSubmission = async (req: Request, res: Response) => {
   const submissionID = req.body._id || "";
   const auth = req.headers.authorization || "";

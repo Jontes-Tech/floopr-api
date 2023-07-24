@@ -141,7 +141,7 @@ export const contribute = async (req: Request, res: Response) => {
         console.error(error);
       });
   } else {
-    console.log("To confirm, use token:" + confirmationToken);
+    console.log("To confirm, use token: " + confirmationToken);
   }
 
   const objectName = objectID.insertedId.toString() + ".mp3";

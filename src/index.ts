@@ -18,6 +18,7 @@ import { approveSubmission } from "./routes/approveSubmission";
 import { z } from "zod";
 import { contactCollection } from "./database";
 import ratelimit from "express-rate-limit";
+import { minioClient } from "./minio";
 
 sgMail.setApiKey(process.env.SENDGRID_API_KEY as string);
 
@@ -58,7 +59,7 @@ app.use(
 
 const standardRateLimit = ratelimit({
   windowMs: 15 * 60 * 1000,
-  max: 32,
+  max: 64,
 });
 
 app.use(express.json({ limit: "4mb" }));
@@ -161,12 +162,51 @@ app.get("/v1/submissions", standardRateLimit, listSubmissions);
 
 app.delete("/v1/:submissionID", standardRateLimit, denySubmission);
 
+app.get(
+  "/v1/submissions/:submissionID",
+  standardRateLimit,
+  async (req, res) => {
+    const submissionID = req.params.submissionID || "";
+    const auth = req.headers.authorization || "";
+
+    if (!auth || auth !== process.env.SUPERSECRETADMIN) {
+      res.status(401).send({ success: false, message: "Unauthorized" });
+      return;
+    }
+
+    if (!submissionID) {
+      res
+        .status(400)
+        .send({ success: false, message: "No submission ID provided" });
+      return;
+    }
+    minioClient
+      .getObject("submissions", req.params.submissionID)
+      .then(function (fileStream: any) {
+        res.setHeader(
+          "Content-Type",
+          req.params.submissionID.split(".").pop() == "mp3"
+            ? "audio/mpeg"
+            : "audio/mid"
+        );
+        fileStream.pipe(res);
+      })
+      .catch(function (err: any) {
+        console.log(err);
+        if (err.code == "NoSuchKey") {
+          res.status(404).send({ success: false, message: "Loop not found" });
+          return;
+        }
+        res.status(500).send({ success: false, message: err.message });
+      });
+  }
+);
 app.post("/v1/approve", standardRateLimit, approveSubmission);
 
 app.get("/v1/health", standardRateLimit, (req, res) => {
-  res.setHeader("Content-Type", "application/json; charset=utf-8")
+  res.setHeader("Content-Type", "application/json; charset=utf-8");
   // deepcode ignore TooPermissiveCorsHeader: We don't need CORS protection because the API is stateless
-  res.setHeader("Access-Control-Allow-Origin", "*")
+  res.setHeader("Access-Control-Allow-Origin", "*");
   res.send({ success: true, message: "Healthy" });
 });
 
