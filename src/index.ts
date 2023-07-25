@@ -203,6 +203,12 @@ app.get(
 );
 app.post("/v1/approve", standardRateLimit, approveSubmission);
 
+app.options("*", standardRateLimit, (req, res) => {
+  // deepcode ignore TooPermissiveCorsHeader: <please specify a reason of ignoring this>
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
+});
+
 app.get("/v1/health", standardRateLimit, (req, res) => {
   res.setHeader("Content-Type", "application/json; charset=utf-8");
   // deepcode ignore TooPermissiveCorsHeader: We don't need CORS protection because the API is stateless
