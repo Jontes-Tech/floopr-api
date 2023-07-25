@@ -3,6 +3,7 @@ import helmet from "helmet";
 import { config } from "dotenv";
 import morgan from "morgan";
 import Multer from "multer";
+import cors from 'cors'
 
 config();
 import sgMail from "@sendgrid/mail";
@@ -19,6 +20,7 @@ import { z } from "zod";
 import { contactCollection } from "./database";
 import ratelimit from "express-rate-limit";
 import { minioClient } from "./minio";
+import { ObjectId } from "mongodb";
 
 sgMail.setApiKey(process.env.SENDGRID_API_KEY as string);
 
@@ -43,6 +45,8 @@ interface LoopResponse {
 
 // file deepcode ignore UseCsurfForExpress: We don't need CSRF protection because the API is stateless
 const app = express();
+
+app.use(cors())
 
 // Ratelimit all routes to 100 requests per 15 minutes, unless otherwise specified
 app.use(
@@ -214,6 +218,40 @@ app.get("/v1/health", standardRateLimit, (req, res) => {
   // deepcode ignore TooPermissiveCorsHeader: We don't need CORS protection because the API is stateless
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.send({ success: true, message: "Healthy" });
+});
+
+app.get("/v1/contacts", standardRateLimit, async (req, res) => {
+  const auth = req.headers.authorization || "";
+
+  if (!auth || auth !== process.env.SUPERSECRETADMIN) {
+    res.status(401).send({ success: false, message: "Unauthorized" });
+    return;
+  }
+
+  const contacts = await contactCollection.find().toArray();
+
+  res.send({ success: true, contacts: contacts });
+})  
+
+app.delete("/v1/contacts/:contactID", standardRateLimit, async (req, res) => {
+  const auth = req.headers.authorization || "";
+  if (!auth || auth !== process.env.SUPERSECRETADMIN) {
+    res.status(401).send({ success: false, message: "Unauthorized" });
+    return;
+  }
+
+  const contactID = req.params.contactID || "";
+
+  if (!contactID) {
+    res
+      .status(400)
+      .send({ success: false, message: "No contact ID provided" });
+    return;
+  }
+
+  contactCollection.deleteOne({ _id: new ObjectId(contactID) });
+
+  res.send({ success: true, message: "Contact deleted" });
 });
 
 app.get("/", standardRateLimit, (req, res) => {
