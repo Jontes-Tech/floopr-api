@@ -3,7 +3,8 @@ import helmet from "helmet";
 import { config } from "dotenv";
 import morgan from "morgan";
 import Multer from "multer";
-import cors from 'cors'
+import cors from "cors";
+import { requireAdmin } from "./middlewares/admin";
 
 config();
 import sgMail from "@sendgrid/mail";
@@ -18,7 +19,24 @@ import { denySubmission } from "./routes/denySubmission";
 import { approveSubmission } from "./routes/approveSubmission";
 import { z } from "zod";
 import { contactCollection } from "./database";
-import ratelimit from "express-rate-limit";
+import { RateLimiterMemory } from "rate-limiter-flexible";
+import { Request, Response } from "express";
+export const rateLimiter = new RateLimiterMemory({
+  points: 64,
+  duration: 60 * 5,
+});
+const standardRateLimit = (req: Request, res: Response, next: any) => {
+  rateLimiter
+    .consume(req.headers["x-forwarded-for"] + "" || req.ip)
+    .then(() => {
+      next();
+    })
+    .catch(() => {
+      // deepcode ignore TooPermissiveCorsHeader: It's just an error message
+      res.set("Access-Control-Allow-Origin", "*");
+      res.status(429).send("You're going too fast there, buddy.");
+    });
+};
 import { minioClient } from "./minio";
 import { ObjectId } from "mongodb";
 
@@ -46,7 +64,7 @@ interface LoopResponse {
 // file deepcode ignore UseCsurfForExpress: We don't need CSRF protection because the API is stateless
 const app = express();
 
-app.use(cors())
+app.use(cors());
 
 // Ratelimit all routes to 100 requests per 15 minutes, unless otherwise specified
 app.use(
@@ -61,11 +79,6 @@ app.use(
   )
 );
 
-const standardRateLimit = ratelimit({
-  windowMs: 15 * 60 * 1000,
-  max: 64,
-});
-
 app.use(express.json({ limit: "4mb" }));
 
 app.get("/v1/loops", standardRateLimit, listLoops);
@@ -74,13 +87,9 @@ app.get("/v1/instruments", standardRateLimit, listInstruments);
 
 app.get("/v1/loops/:filename", standardRateLimit, downloadFile);
 
-// Limit write routes to 5 requests per 15 minutes
 app.post(
   "/v1/upload",
-  ratelimit({
-    windowMs: 15 * 60 * 1000,
-    max: 5,
-  }),
+  standardRateLimit,
   Multer({
     storage: Multer.memoryStorage(),
     limits: { fileSize: 100 * 1024 * 1024 },
@@ -100,10 +109,6 @@ const contactFormSchema = z
 
 app.post(
   "/v1/contact",
-  ratelimit({
-    windowMs: 15 * 60 * 1000,
-    max: 5,
-  }),
   async (req, res) => {
     // Put message, name and email into one variable
     const message = {
@@ -138,6 +143,7 @@ app.post(
       (!turnstileJSON.success || turnstileJSON.score < 0.5)
     ) {
       res.status(400).send({ success: false, message: "Captcha failed" });
+      rateLimiter.penalty(16);
       return;
     }
     // Now we finally know that the message is valid, so we can send it, by adding it to mongoDB
@@ -162,21 +168,16 @@ app.post(
 
 app.get("/v1/confirm", standardRateLimit, confirmEmail);
 
-app.get("/v1/submissions", standardRateLimit, listSubmissions);
+app.get("/v1/submissions", standardRateLimit, requireAdmin, listSubmissions);
 
-app.delete("/v1/:submissionID", standardRateLimit, denySubmission);
+app.delete("/v1/:submissionID", standardRateLimit, requireAdmin, denySubmission);
 
 app.get(
   "/v1/submissions/:submissionID",
+  requireAdmin,
   standardRateLimit,
   async (req, res) => {
     const submissionID = req.params.submissionID || "";
-    const auth = req.headers.authorization || "";
-
-    if (!auth || auth !== process.env.SUPERSECRETADMIN) {
-      res.status(401).send({ success: false, message: "Unauthorized" });
-      return;
-    }
 
     if (!submissionID) {
       res
@@ -205,9 +206,9 @@ app.get(
       });
   }
 );
-app.post("/v1/approve", standardRateLimit, approveSubmission);
+app.post("/v1/approve", standardRateLimit, requireAdmin, approveSubmission);
 
-app.options("*", standardRateLimit, (req, res) => {
+app.options("*", standardRateLimit, (_, res) => {
   // deepcode ignore TooPermissiveCorsHeader: <please specify a reason of ignoring this>
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
@@ -220,32 +221,18 @@ app.get("/v1/health", standardRateLimit, (req, res) => {
   res.send({ success: true, message: "Healthy" });
 });
 
-app.get("/v1/contacts", standardRateLimit, async (req, res) => {
-  const auth = req.headers.authorization || "";
-
-  if (!auth || auth !== process.env.SUPERSECRETADMIN) {
-    res.status(401).send({ success: false, message: "Unauthorized" });
-    return;
-  }
-
+app.get("/v1/contacts", standardRateLimit, requireAdmin, async (req, res) => {
   const contacts = await contactCollection.find().toArray();
 
   res.send({ success: true, contacts: contacts });
-})  
+});
 
-app.delete("/v1/contacts/:contactID", standardRateLimit, async (req, res) => {
-  const auth = req.headers.authorization || "";
-  if (!auth || auth !== process.env.SUPERSECRETADMIN) {
-    res.status(401).send({ success: false, message: "Unauthorized" });
-    return;
-  }
+app.delete("/v1/contacts/:contactID", standardRateLimit, requireAdmin, async (req, res) => {
 
   const contactID = req.params.contactID || "";
 
   if (!contactID) {
-    res
-      .status(400)
-      .send({ success: false, message: "No contact ID provided" });
+    res.status(400).send({ success: false, message: "No contact ID provided" });
     return;
   }
 

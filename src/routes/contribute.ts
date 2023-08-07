@@ -6,6 +6,7 @@ import slugify from "slugify";
 import crypto from "crypto";
 import sgMail from "@sendgrid/mail";
 import { spawn } from "child_process";
+import { rateLimiter } from "../index";
 
 // file deepcode ignore NoRateLimitingForExpensiveWebOperation: We're rateliming in src/index.ts
 export const contribute = async (req: Request, res: Response) => {
@@ -26,7 +27,11 @@ export const contribute = async (req: Request, res: Response) => {
     return;
   }
   let midi = false;
-  if (req.file.mimetype === "audio/midi" || req.file.mimetype === "audio/x-midi" || req.file.mimetype === "audio/mid") {
+  if (
+    req.file.mimetype === "audio/midi" ||
+    req.file.mimetype === "audio/x-midi" ||
+    req.file.mimetype === "audio/mid"
+  ) {
     midi = true;
   }
   const ip = req.headers["x-forwarded-for"] || req.socket.remoteAddress;
@@ -37,6 +42,7 @@ export const contribute = async (req: Request, res: Response) => {
   const loopForm = loopFormSchema.safeParse(req.body);
   if (!loopForm.success) {
     res.status(400).send({ success: false, message: loopForm.error });
+    rateLimiter.penalty(4)
     return;
   }
   let turnstileBody = new FormData();
@@ -57,6 +63,7 @@ export const contribute = async (req: Request, res: Response) => {
     (!turnstileJSON.success || turnstileJSON.score < 0.5)
   ) {
     res.status(400).send({ success: false, message: "Captcha failed" });
+    rateLimiter.penalty(4)
     return;
   }
 
@@ -146,7 +153,10 @@ export const contribute = async (req: Request, res: Response) => {
 
   const objectName = objectID.insertedId.toString() + ".mp3";
 
-  if (req.file.mimetype === "audio/midi" || req.file.mimetype === "audio/x-midi") {
+  if (
+    req.file.mimetype === "audio/midi" ||
+    req.file.mimetype === "audio/x-midi"
+  ) {
     // If the file is a MIDI file, convert it to a WAV file using timidity
     const timidity = spawn("timidity", ["-Ow", "-o", "-", "-"]);
 
@@ -179,6 +189,7 @@ export const contribute = async (req: Request, res: Response) => {
     timidity.stdout.pipe(ffmpeg.stdin);
 
     ffmpeg.on("error", () => {
+      rateLimiter.penalty(16)
       res
         .status(500)
         .send({ success: false, message: "Error converting file" });

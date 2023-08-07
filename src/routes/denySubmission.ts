@@ -5,12 +5,6 @@ import { minioClient } from "../minio";
 export const denySubmission = async (req: Request, res: Response) => {
   const reason = req.query.reason || "";
   const submissionID = req.params.submissionID || "";
-  const auth = req.headers.authorization || "";
-
-  if (!auth || auth !== process.env.SUPERSECRETADMIN) {
-    res.status(401).send({ success: false, message: "Unauthorized" });
-    return;
-  }
 
   if (!submissionID) {
     res
