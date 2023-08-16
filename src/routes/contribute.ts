@@ -42,7 +42,7 @@ export const contribute = async (req: Request, res: Response) => {
   const loopForm = loopFormSchema.safeParse(req.body);
   if (!loopForm.success) {
     res.status(400).send({ success: false, message: loopForm.error });
-    rateLimiter.penalty(4)
+    rateLimiter.penalty(4);
     return;
   }
   let turnstileBody = new FormData();
@@ -63,7 +63,7 @@ export const contribute = async (req: Request, res: Response) => {
     (!turnstileJSON.success || turnstileJSON.score < 0.5)
   ) {
     res.status(400).send({ success: false, message: "Captcha failed" });
-    rateLimiter.penalty(4)
+    rateLimiter.penalty(4);
     return;
   }
 
@@ -157,72 +157,54 @@ export const contribute = async (req: Request, res: Response) => {
     req.file.mimetype === "audio/midi" ||
     req.file.mimetype === "audio/x-midi"
   ) {
-    // If the file is a MIDI file, convert it to a WAV file using timidity
-    const timidity = spawn("timidity", ["-Ow", "-o", "-", "-"]);
+    // Assuming you have the minioClient configured properly
 
-    timidity.stdin.write(req.file?.buffer);
-    timidity.stdin.end();
+    // Your existing code for fetching and processing the audio
+    const audioProcessedResponse = await fetch(
+      "http://floopr-upload-engine:3004",
+      {
+        method: "POST",
+        body: req.file?.buffer,
+        headers: {
+          "Content-Type": "audio/midi",
+        },
+      }
+    );
+    const audioProcessedBuffer = await audioProcessedResponse.arrayBuffer();
 
-    // Use ffmpeg to convert the WAV file to an MP3 file
-    const ffmpeg = spawn("ffmpeg", [
-      "-i",
-      "-",
-      "-codec:a",
-      "libmp3lame",
-      "-qscale:a",
-      "4",
-      "-map_metadata",
-      "-1",
-      "-metadata",
-      "library=Floopr, the free loop library",
-      "-fflags",
-      "+bitexact",
-      "-flags:v",
-      "+bitexact",
-      "-flags:a",
-      "+bitexact",
-      "-f",
-      "mp3",
-      "-",
-    ]);
-
-    timidity.stdout.pipe(ffmpeg.stdin);
-
-    ffmpeg.on("error", () => {
-      rateLimiter.penalty(16)
-      res
-        .status(500)
-        .send({ success: false, message: "Error converting file" });
-    });
-
-    // Now we upload the raw Midi file to Minio
+    // Uploading the processed audio to Minio
     minioClient.putObject(
       "submissions",
       objectID.insertedId.toString() + ".mid",
-      req.file?.buffer,
+      Buffer.from(audioProcessedBuffer), // Convert ArrayBuffer to Buffer
       function (error: any) {
         if (error) {
           res
             .status(500)
-            .send({ success: false, message: "Error uploading file" });
+            .send({ success: false, message: "Error uploading MIDI file" });
           return console.log(error);
         }
-      }
-    );
 
-    // Upload the MP3 file to Minio
-    minioClient.putObject(
-      "submissions",
-      objectName,
-      ffmpeg.stdout,
-      function (error: any) {
-        if (error) {
-          res
-            .status(500)
-            .send({ success: false, message: "Error uploading file" });
-          return console.log(error);
-        }
-        res.send({ success: true, message: "File uploaded successfully" });
+        // Now upload the audioProcessed response body (wave file) to Minio
+        minioClient.putObject(
+          "submissions",
+          objectID.insertedId.toString() + ".mp3",
+          Buffer.from(audioProcessedBuffer), // Use the same buffer since it's the audio wave file
+          function (audioUploadError: any) {
+            if (audioUploadError) {
+              res.status(500).send({
+                success: false,
+                message: "Error uploading audio wave file",
+              });
+              return console.log(audioUploadError);
+            }
+
+            // Both MIDI and audio wave files are uploaded successfully
+            res
+              .status(200)
+              .send({ success: true, message: "Files uploaded successfully" });
+          }
+        );
       }
     );
   } else {

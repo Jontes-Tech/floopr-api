@@ -9,8 +9,7 @@ export const requireAdmin = (
   next: NextFunction
 ) => {
   if (
-    req.headers.authorization &&
-    req.headers.authorization === process.env.ADMIN_TOKEN
+    req.headers.Authorization === process.env.SUPER_SECRET_TOKEN
   ) {
     console.log(
       "Successful admin auth, potentially problematic, but not necessarily"
