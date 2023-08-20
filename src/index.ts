@@ -18,7 +18,7 @@ import { listSubmissions } from "./routes/listSubmissions";
 import { denySubmission } from "./routes/denySubmission";
 import { approveSubmission } from "./routes/approveSubmission";
 import { z } from "zod";
-import { contactCollection } from "./database";
+import { contactCollection, submissionsCollection } from "./database";
 import { RateLimiterMemory } from "rate-limiter-flexible";
 import { Request, Response } from "express";
 export const rateLimiter = new RateLimiterMemory({
@@ -107,70 +107,72 @@ const contactFormSchema = z
   })
   .strict();
 
-app.post(
-  "/v1/contact",
-  async (req, res) => {
-    // Put message, name and email into one variable
-    const message = {
-      email: req.body.email || "",
-      subject: req.body.subject || "",
-      message: req.body.message || "",
-      captcha: req.body["cf-turnstile-response"] || "",
-      ip: req.headers["x-forwarded-for"] || req.socket.remoteAddress,
-    };
+app.post("/v1/contact", async (req, res) => {
+  // Put message, name and email into one variable
+  const message = {
+    email: req.body.email || "",
+    subject: req.body.subject || "",
+    message: req.body.message || "",
+    captcha: req.body["cf-turnstile-response"] || "",
+    ip: req.headers["x-forwarded-for"] || req.socket.remoteAddress,
+  };
 
-    // Use Zod to validate the message
-    const validMessage = await contactFormSchema.safeParseAsync(message);
+  // Use Zod to validate the message
+  const validMessage = await contactFormSchema.safeParseAsync(message);
 
-    if (!validMessage.success) {
-      return res.status(400).send("Invalid message");
-    }
-    let turnstileBody = new FormData();
-    turnstileBody.append("response", validMessage.data.captcha);
-    turnstileBody.append("secret", process.env.TURNSTILE_SECRET || "");
-    turnstileBody.append("remoteip", validMessage.data.ip?.toString() || "");
-    let turnstileResponse = await fetch(
-      "https://challenges.cloudflare.com/turnstile/v0/siteverify",
-      {
-        method: "POST",
-        body: turnstileBody,
-      }
-    );
-    const turnstileJSON = await turnstileResponse.json();
-
-    if (
-      process.env.NODE_ENV === "production" &&
-      (!turnstileJSON.success || turnstileJSON.score < 0.5)
-    ) {
-      res.status(400).send({ success: false, message: "Captcha failed" });
-      rateLimiter.penalty(16);
-      return;
-    }
-    // Now we finally know that the message is valid, so we can send it, by adding it to mongoDB
-    await contactCollection.insertOne({
-      email: validMessage.data.email,
-      subject: validMessage.data.subject,
-      message: validMessage.data.message,
-      ip: validMessage.data.ip,
-    });
-
-    // Send an email to Jonte, he may forward it to the rest of the team
-    await sgMail.send({
-      to: "jonatan@jontes.page",
-      from: "hi@floopr.org",
-      subject: `New message from ${validMessage.data.email}`,
-      text: `Subject: ${validMessage.data.subject}\n\nMessage: ${validMessage.data.message}`,
-    });
-
-    res.send({ success: true, message: "Message sent" });
+  if (!validMessage.success) {
+    return res.status(400).send("Invalid message");
   }
-);
+  let turnstileBody = new FormData();
+  turnstileBody.append("response", validMessage.data.captcha);
+  turnstileBody.append("secret", process.env.TURNSTILE_SECRET || "");
+  turnstileBody.append("remoteip", validMessage.data.ip?.toString() || "");
+  let turnstileResponse = await fetch(
+    "https://challenges.cloudflare.com/turnstile/v0/siteverify",
+    {
+      method: "POST",
+      body: turnstileBody,
+    }
+  );
+  const turnstileJSON = await turnstileResponse.json();
+
+  if (
+    process.env.NODE_ENV === "production" &&
+    (!turnstileJSON.success || turnstileJSON.score < 0.5)
+  ) {
+    res.status(400).send({ success: false, message: "Captcha failed" });
+    rateLimiter.penalty(16);
+    return;
+  }
+  // Now we finally know that the message is valid, so we can send it, by adding it to mongoDB
+  await contactCollection.insertOne({
+    email: validMessage.data.email,
+    subject: validMessage.data.subject,
+    message: validMessage.data.message,
+    ip: validMessage.data.ip,
+  });
+
+  // Send an email to Jonte, he may forward it to the rest of the team
+  await sgMail.send({
+    to: "jonatan@jontes.page",
+    from: "hi@floopr.org",
+    subject: `New message from ${validMessage.data.email}`,
+    text: `Subject: ${validMessage.data.subject}\n\nMessage: ${validMessage.data.message}`,
+  });
+
+  res.send({ success: true, message: "Message sent" });
+});
 
 app.get("/v1/confirm", standardRateLimit, confirmEmail);
 
 app.get("/v1/submissions", standardRateLimit, requireAdmin, listSubmissions);
 
-app.delete("/v1/:submissionID", standardRateLimit, requireAdmin, denySubmission);
+app.delete(
+  "/v1/:submissionID",
+  standardRateLimit,
+  requireAdmin,
+  denySubmission
+);
 
 app.get(
   "/v1/submissions/:submissionID",
@@ -185,8 +187,21 @@ app.get(
         .send({ success: false, message: "No submission ID provided" });
       return;
     }
+
+    // Check to make sure it exists in Mongo
+    const submission = await submissionsCollection.findOne({
+      _id: new ObjectId(submissionID),
+    });
+
+    if (!submission) {
+      res
+        .status(400)
+        .send({ success: false, message: "Invalid submission ID" });
+      return;
+    }
+
     minioClient
-      .getObject("submissions", req.params.submissionID)
+      .getObject(process.env.BUCKET_NAME || "", req.params.submissionID)
       .then(function (fileStream: any) {
         res.setHeader(
           "Content-Type",
@@ -227,19 +242,25 @@ app.get("/v1/contacts", standardRateLimit, requireAdmin, async (req, res) => {
   res.send({ success: true, contacts: contacts });
 });
 
-app.delete("/v1/contacts/:contactID", standardRateLimit, requireAdmin, async (req, res) => {
+app.delete(
+  "/v1/contacts/:contactID",
+  standardRateLimit,
+  requireAdmin,
+  async (req, res) => {
+    const contactID = req.params.contactID || "";
 
-  const contactID = req.params.contactID || "";
+    if (!contactID) {
+      res
+        .status(400)
+        .send({ success: false, message: "No contact ID provided" });
+      return;
+    }
 
-  if (!contactID) {
-    res.status(400).send({ success: false, message: "No contact ID provided" });
-    return;
+    contactCollection.deleteOne({ _id: new ObjectId(contactID) });
+
+    res.send({ success: true, message: "Contact deleted" });
   }
-
-  contactCollection.deleteOne({ _id: new ObjectId(contactID) });
-
-  res.send({ success: true, message: "Contact deleted" });
-});
+);
 
 app.get("/", standardRateLimit, (req, res) => {
   res.redirect("https://floopr.org");

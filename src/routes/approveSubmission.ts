@@ -1,5 +1,4 @@
 import { Request, Response } from "express";
-import { minioClient, CopyConditions } from "../minio";
 import { submissionsCollection, MONGOID, loopsCollection } from "../database";
 import sgMail from "@sendgrid/mail";
 import slugify from "slugify";
@@ -95,36 +94,6 @@ export const approveSubmission = async (req: Request, res: Response) => {
   console.log(
     `Moving ${submissionID} to loops collection, because it was approved.`
   );
-  // deepcode ignore HTTPSourceWithUncheckedType: We trust the user, because they're an admin. Is that bad practice?
-  req.body.files.forEach((file: string) => {
-    // COPY /submissions/id.file /loops/id.file
-    // Create a CopyConditions instance
-    const copyConditions = new CopyConditions();
-    minioClient.copyObject(
-      "loops",
-      submissionID + "." + file,
-      "/submissions/" + submissionID + "." + file,
-      copyConditions,
-      function (e) {
-        if (e) {
-          return console.log(e);
-        }
-        console.log("Successfully copied the object");
-
-        // DELETE /submissions/id.file
-        minioClient.removeObject(
-          "submissions",
-          submissionID + "." + file,
-          function (e) {
-            if (e) {
-              return console.log(e);
-            }
-            console.log("Successfully deleted the object");
-          }
-        );
-      }
-    );
-  });
 
   res.send({ success: true, message: "Submission approved!" });
 };

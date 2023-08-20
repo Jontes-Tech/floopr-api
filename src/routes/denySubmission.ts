@@ -63,7 +63,7 @@ export const denySubmission = async (req: Request, res: Response) => {
 
   submission.files.forEach((file: string) => {
     minioClient.removeObject(
-      "submissions",
+      process.env.BUCKET_NAME || "",
       submission._id + "." + file,
       function (error: any) {
         if (error) {

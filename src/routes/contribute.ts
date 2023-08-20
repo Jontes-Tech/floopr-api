@@ -5,7 +5,6 @@ import { loopFormSchema } from "../schemas";
 import slugify from "slugify";
 import crypto from "crypto";
 import sgMail from "@sendgrid/mail";
-import { spawn } from "child_process";
 import { rateLimiter } from "../index";
 
 // file deepcode ignore NoRateLimitingForExpensiveWebOperation: We're rateliming in src/index.ts
@@ -151,44 +150,32 @@ export const contribute = async (req: Request, res: Response) => {
     console.log("To confirm, use token: " + confirmationToken);
   }
 
-  const objectName = objectID.insertedId.toString() + ".mp3";
+  // Your existing code for fetching and processing the audio
+  const audioProcessedResponse = await fetch(process.env.PROCESSINGURL || "", {
+    method: "POST",
+    body: req.file?.buffer,
+    headers: {
+      "Content-Type": "audio/midi",
+    },
+  });
+  const audioProcessedBuffer = await audioProcessedResponse.arrayBuffer();
 
-  if (
-    req.file.mimetype === "audio/midi" ||
-    req.file.mimetype === "audio/x-midi"
-  ) {
-    // Assuming you have the minioClient configured properly
-
-    // Your existing code for fetching and processing the audio
-    const audioProcessedResponse = await fetch(
-      "http://floopr-upload-engine:3004",
-      {
-        method: "POST",
-        body: req.file?.buffer,
-        headers: {
-          "Content-Type": "audio/midi",
-        },
+  // Uploading the processed audio to Minio
+  minioClient.putObject(
+    process.env.BUCKET_NAME || "",
+    objectID.insertedId.toString() + ".mp3",
+    Buffer.from(audioProcessedBuffer), // Convert ArrayBuffer to Buffer
+    function (error: any) {
+      if (error) {
+        res
+          .status(500)
+          .send({ success: false, message: "Error uploading MIDI file" });
+        return console.log(error);
       }
-    );
-    const audioProcessedBuffer = await audioProcessedResponse.arrayBuffer();
-
-    // Uploading the processed audio to Minio
-    minioClient.putObject(
-      "submissions",
-      objectID.insertedId.toString() + ".mid",
-      Buffer.from(audioProcessedBuffer), // Convert ArrayBuffer to Buffer
-      function (error: any) {
-        if (error) {
-          res
-            .status(500)
-            .send({ success: false, message: "Error uploading MIDI file" });
-          return console.log(error);
-        }
-
-        // Now upload the audioProcessed response body (wave file) to Minio
+      if (midi) {
         minioClient.putObject(
-          "submissions",
-          objectID.insertedId.toString() + ".mp3",
+          process.env.BUCKET_NAME || "",
+          objectID.insertedId.toString() + ".mid",
           Buffer.from(audioProcessedBuffer), // Use the same buffer since it's the audio wave file
           function (audioUploadError: any) {
             if (audioUploadError) {
@@ -205,55 +192,11 @@ export const contribute = async (req: Request, res: Response) => {
               .send({ success: true, message: "Files uploaded successfully" });
           }
         );
+      } else {
+        res
+          .status(200)
+          .send({ success: true, message: "Files uploaded successfully" });
       }
-    );
-  } else {
-    // If the file is not a MIDI file, use ffmpeg to convert it to an MP3 file
-    const ffmpeg = spawn("ffmpeg", [
-      "-i",
-      "-",
-      "-codec:a",
-      "libmp3lame",
-      "-qscale:a",
-      "4",
-      "-map_metadata",
-      "-1",
-      "-metadata",
-      "library=Floopr, the free loop library",
-      "-fflags",
-      "+bitexact",
-      "-flags:v",
-      "+bitexact",
-      "-flags:a",
-      "+bitexact",
-      "-f",
-      "mp3",
-      "-",
-    ]);
-
-    ffmpeg.stdin.write(req.file?.buffer);
-    ffmpeg.stdin.end();
-
-    ffmpeg.on("error", () => {
-      res
-        .status(500)
-        .send({ success: false, message: "Error converting file" });
-    });
-
-    // Upload the MP3 file to Minio
-    minioClient.putObject(
-      "submissions",
-      objectName,
-      ffmpeg.stdout,
-      function (error: any) {
-        if (error) {
-          res
-            .status(500)
-            .send({ success: false, message: "Error uploading file" });
-          return console.log(error);
-        }
-        res.send({ success: true, message: "File uploaded successfully" });
-      }
-    );
-  }
+    }
+  );
 };

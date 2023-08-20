@@ -8,7 +8,9 @@
   },
   "scripts": {
     "build": "tsc",
-    "dev": "nodemon --watch 'src/**/*.ts' --exec 'ts-node' src/index.ts"
+    "dev": "nodemon --watch 'src/**/*.ts' --exec 'ts-node' src/index.ts",
+    "dbuild": "DOCKER_BUILDKIT=0 docker build -t jonatanholmgren/floopr-api:latest .",
+    "dpush": "docker push jonatanholmgren/floopr-api:latest" 
   },
   "author": "Jonte",
   "keywords": [],
