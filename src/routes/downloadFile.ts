@@ -6,14 +6,14 @@ export const downloadFile = async (req: Request, res: Response) => {
   // deepcode ignore TooPermissiveCorsHeader: Public API, we don't care about CORS
   res.setHeader("Access-Control-Allow-Origin", "*");
 
-  // Check if in database
-  console.log(req.params.filename.split(".")[0]);
-  const loop = await loopsCollection.findOne({
-    _id: new MONGOID(req.params.filename.split(".")[0]),
-  });
-
-  if (!loop) {
+  try {
+    await loopsCollection.findOne({
+      _id: new MONGOID(req.params.filename.split(".")[0]),
+    });
+    console.log("Found loop")
+  } catch (e) {
     res.status(404).send({ success: false, message: "Loop not found" });
+    console.log("Didn't find loop")
     return;
   }
 
