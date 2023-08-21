@@ -155,7 +155,7 @@ export const contribute = async (req: Request, res: Response) => {
     method: "POST",
     body: req.file?.buffer,
     headers: {
-      "Content-Type": "audio/midi",
+      "Content-Type": midi ? "audio/midi" : "audio/mpeg",
     },
   });
   const audioProcessedBuffer = await audioProcessedResponse.arrayBuffer();
@@ -169,7 +169,7 @@ export const contribute = async (req: Request, res: Response) => {
       if (error) {
         res
           .status(500)
-          .send({ success: false, message: "Error uploading MIDI file" });
+          .send({ success: false, message: "Error uploading MP3 file" });
         return console.log(error);
       }
       if (midi) {
@@ -181,7 +181,7 @@ export const contribute = async (req: Request, res: Response) => {
             if (audioUploadError) {
               res.status(500).send({
                 success: false,
-                message: "Error uploading audio wave file",
+                message: "Error uploading Midi file",
               });
               return console.log(audioUploadError);
             }

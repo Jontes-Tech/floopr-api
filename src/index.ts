@@ -17,6 +17,7 @@ import { confirmEmail } from "./routes/confirmEmail";
 import { listSubmissions } from "./routes/listSubmissions";
 import { denySubmission } from "./routes/denySubmission";
 import { approveSubmission } from "./routes/approveSubmission";
+import { deleteLoop } from "./routes/takeDown";
 import { z } from "zod";
 import { contactCollection, submissionsCollection } from "./database";
 import { RateLimiterMemory } from "rate-limiter-flexible";
@@ -86,6 +87,8 @@ app.get("/v1/loops", standardRateLimit, listLoops);
 app.get("/v1/instruments", standardRateLimit, listInstruments);
 
 app.get("/v1/loops/:filename", standardRateLimit, downloadFile);
+
+app.delete("/v1/loops/:filename", standardRateLimit, requireAdmin, deleteLoop);
 
 app.post(
   "/v1/upload",
