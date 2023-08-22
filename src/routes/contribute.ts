@@ -9,7 +9,7 @@ import { rateLimiter } from "../index";
 
 // file deepcode ignore NoRateLimitingForExpensiveWebOperation: We're rateliming in src/index.ts
 export const contribute = async (req: Request, res: Response) => {
-  if (!req.file) {
+  if (!req.file || !req.file.buffer) {
     res.status(400).send({ success: false, message: "No file uploaded" });
     return;
   }
@@ -176,7 +176,8 @@ export const contribute = async (req: Request, res: Response) => {
         minioClient.putObject(
           process.env.BUCKET_NAME || "",
           objectID.insertedId.toString() + ".mid",
-          Buffer.from(audioProcessedBuffer), // Use the same buffer since it's the audio wave file
+          // @ts-ignore
+          req.file?.buffer, // Use the same buffer since it's the audio wave file
           function (audioUploadError: any) {
             if (audioUploadError) {
               res.status(500).send({
